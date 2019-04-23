@@ -3,9 +3,10 @@ Oficial plugin page in Wordpress repository - https://ru.wordpress.org/plugins/p
 
 Plugin Author website - https://www.varktech.com/
 
-# How to use it
-Place the package in the root of the theme;
-Add within functions.php:
+## How to use it
+1. Place the package in the root of the theme;
+
+2. Add within functions.php:
 ```
 if ( is_plugin_active( 'pricing-deals-for-woocommerce/vt-pricing-deals.php' ) &&
      is_plugin_active( 'pricing-deals-pro-for-woocommerce/vt-pricing-deals-pro.php' ) ) {

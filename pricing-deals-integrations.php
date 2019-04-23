@@ -258,60 +258,77 @@ function do_vtprd_product_page_integrations()
 
         $rules = new VTPRD_Apply_Rules();
 
-        $product_id = $product->get_id();
-
-        if (!$product->is_purchasable() ||
-            !$product->is_in_stock()) {
-            $single_product_discount_info[$product_id]['is_available'] = 0;
-
-            return;
-        } else {
-            $single_product_discount_info[$product_id]['is_available'] = 1;
-        }
-        //echo $product_id;
-
         /**
-         * Emulate adding to cart in order to use 'vtprd_is_product_in_inPop_group'
-         * because the method works with cart items only.
-         **/
-        WC()->cart->add_to_cart($product_id, 1);
-
-        // loop all the rules and break on the first found
-        foreach ($vtprd_rules_set as $n => $set) {
-
-            /**
-             * Zero is the first element in cart, we must check the last added.
-             */
-            $addedItemIndex = count(WC()->cart->get_cart()) - 1;
-
-            if ($rules->vtprd_is_product_in_inPop_group($n, $addedItemIndex) && vtprd_rule_date_validity_test($n)) {
-
-                $p_di                               = &$single_product_discount_info[$product_id];
-                $p_di['is_discounted']              = 1;
-                $p_di['rule_template']              = $set->rule_template;
-                $p_di['discount_product_short_msg'] = $set->discount_product_short_msg;
-                $p_di['discount_product_full_msg']  = $set->discount_product_full_msg;
-                // without taxes
-                $p_di['product_price'] = vtprd_get_current_active_price($product_id, $product);
-                // with taxes
-                $p_di['product_price_with_tax'] = vtprd_maybe_price_incl_tax($product_id, $p_di['product_price']);
-
-                $p_di['discount_amount'] = $rules->vtprd_compute_each_discount($n, 0, $p_di['product_price_with_tax']);
-                if ($p_di['product_price_with_tax'] != $p_di['discount_amount']) {
-                    $p_di['sale_price'] = $p_di['product_price_with_tax'] - $p_di['discount_amount'];
-                } else {
-                    $p_di['sale_price'] = '';
+         * If the product is variable add variations to the array
+         */
+        $products = [];
+        $products[] = $product;
+        if($product->get_type() === 'variable')
+        {
+            if(!empty($variations_ids = $product->get_children())) {
+                foreach ($variations_ids as $variations_id) {
+                    $products[] = wc_get_product($variations_id);
                 }
-
-            } else {
-                if ($p_di['is_discounted'] != 1) {
-                    $p_di['is_discounted'] = 0;
-                }
-
             }
         }
-        // remove item from the cart
-        remove_item_from_cart($product_id, 1);
+
+        foreach ($products as $k => $product) {
+    
+            $product_id = $product->get_id();
+
+            if (!$product->is_purchasable() ||
+                !$product->is_in_stock()) {
+                $single_product_discount_info[$product_id]['is_available'] = 0;
+
+                return;
+            } else {
+                $single_product_discount_info[$product_id]['is_available'] = 1;
+            }
+            //echo $product_id;
+
+            /**
+             * Emulate adding to cart in order to use 'vtprd_is_product_in_inPop_group'
+             * because the method works with cart items only.
+             **/
+            WC()->cart->add_to_cart($product_id, 1);
+
+            // loop all the rules and break on the first found
+            foreach ($vtprd_rules_set as $n => $set) {
+
+                /**
+                 * Zero is the first element in cart, we must check the last added.
+                 */
+                $addedItemIndex = count(WC()->cart->get_cart()) - 1;
+
+                if ($rules->vtprd_is_product_in_inPop_group($n, $addedItemIndex) && vtprd_rule_date_validity_test($n)) {
+
+                    $p_di                               = &$single_product_discount_info[$product_id];
+                    $p_di['is_discounted']              = 1;
+                    $p_di['rule_template']              = $set->rule_template;
+                    $p_di['discount_product_short_msg'] = $set->discount_product_short_msg;
+                    $p_di['discount_product_full_msg']  = $set->discount_product_full_msg;
+                    // without taxes
+                    $p_di['product_price'] = vtprd_get_current_active_price($product_id, $product);
+                    // with taxes
+                    $p_di['product_price_with_tax'] = vtprd_maybe_price_incl_tax($product_id, $p_di['product_price']);
+
+                    $p_di['discount_amount'] = $rules->vtprd_compute_each_discount($n, 0, $p_di['product_price_with_tax']);
+                    if ($p_di['product_price_with_tax'] != $p_di['discount_amount']) {
+                        $p_di['sale_price'] = $p_di['product_price_with_tax'] - $p_di['discount_amount'];
+                    } else {
+                        $p_di['sale_price'] = '';
+                    }
+
+                } else {
+                    if ($p_di['is_discounted'] != 1) {
+                        $p_di['is_discounted'] = 0;
+                    }
+
+                }
+            }
+            // remove item from the cart
+            remove_item_from_cart($product_id, 1);
+        }
     }
     add_action('woocommerce_before_single_product', 'vtprd_prepare_info_before_single_product', 10);
 
@@ -386,36 +403,10 @@ function do_vtprd_product_page_integrations()
     add_filter('woocommerce_product_is_on_sale', 'vtprd_single_product_is_on_sale', 10, 2);
 
     /**
-     * Replace html price within the single product
+     * Replace original value of regular price.
      *
      */
-    function vtprd_single_product_get_price_html($price, $product)
-    {
-        global $product, $single_product_discount_info;
-
-        if (!is_product() || $product->is_type('variable')) {
-            return $price;
-        }
-
-        $product_id = $product->get_id();
-
-        if ('' === $product->get_price()) {
-            $price = apply_filters('woocommerce_empty_price_html', '', $product);
-        } else if ($product->is_on_sale() && $product->get_regular_price() !== $single_product_discount_info[$product_id]['sale_price'] && $single_product_discount_info[$product_id]['sale_price'] !== '') {
-            $price = wc_format_sale_price(wc_get_price_to_display($product, array('price' => $product->get_regular_price())), wc_get_price_to_display($product, array('price' => $single_product_discount_info[$product_id]['sale_price']))) . $product->get_price_suffix();
-        } else {
-            $price = wc_price(wc_get_price_to_display($product)) . $product->get_price_suffix();
-        }
-
-        return $price;
-    }
-    add_filter('woocommerce_get_price_html', 'vtprd_single_product_get_price_html', 1, 2);
-
-    /**
-     * Replace original value of sale price.
-     *
-     */
-    function vtprd_single_product_get_sale_price($value, $product)
+    function vtprd_single_product_get_regular_price($value, $product)
     {
         if (!is_product()) {
             return $value;
@@ -424,9 +415,54 @@ function do_vtprd_product_page_integrations()
         global $single_product_discount_info;
         $product_id = $product->get_id();
 
-        return $single_product_discount_info[$product_id]['sale_price'];
+        $product_discount_info = $single_product_discount_info[$product_id];
+
+        if (!$product_discount_info['is_available']) {
+            return $value;
+        }
+
+        if (!$product_discount_info['is_discounted']) {
+            return $value;
+        }
+
+        return $product_discount_info['product_price_with_tax']; 
+    }   
+    add_filter('woocommerce_product_get_regular_price', 'vtprd_single_product_get_regular_price', 11, 2);
+
+    /**
+     * Replace original value of sale price.
+     *
+     */
+    function vtprd_single_product_price($value, $product)
+    {
+        if (!is_product()) {
+            return $value;
+        }
+
+        global $single_product_discount_info;
+        $product_id = $product->get_id();
+
+        $product_discount_info = $single_product_discount_info[$product_id];
+
+        if (!$product_discount_info['is_available']) {
+            return $value;
+        }
+
+        if (!$product_discount_info['is_discounted']) {
+            return $value;
+        }
+
+        return $product_discount_info['sale_price'];
     }
-    add_filter('woocommerce_product_get_sale_price', 'vtprd_single_product_get_sale_price', 11, 2);
+    add_filter('woocommerce_product_get_price', 'vtprd_single_product_price', 11, 2);
+    add_filter('woocommerce_product_get_sale_price', 'vtprd_single_product_price', 11, 2);
+
+    function vtprd_get_variation_price($value, $variation) {
+        $variation_id = $variation->get_id();
+        return $variation_id;
+    }
+    add_filter( 'woocommerce_product_variation_get_price', 'vtprd_get_variation_price', 11, 2);
+    add_filter('woocommerce_product_variation_get_sale_price', 'vtprd_get_variation_price', 11, 2);
 
     /**
      * Output advertising message.
@@ -447,13 +483,13 @@ function do_vtprd_product_page_integrations()
      *
      * Only for debugging purposes.
      */
-    // function vtprd_debug_output(){
-    //     global $single_product_discount_info;
-    //     echo "<pre>";
-    //     print_r($single_product_discount_info);
-    //     echo "</pre>";
-    // }
-    // add_action( 'woocommerce_before_single_product', 'vtprd_debug_output', 11 );
+    function vtprd_debug_output(){
+        global $single_product_discount_info;
+        echo "<pre>";
+        print_r($single_product_discount_info);
+        echo "</pre>";
+    }
+    add_action( 'woocommerce_before_single_product', 'vtprd_debug_output', 11 );
 }
 
 /**
